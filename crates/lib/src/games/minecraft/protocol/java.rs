@@ -1,5 +1,3 @@
-use pyo3::{prelude::*, types::{PyDict, PyList}};
-
 use crate::{
     buffer::Buffer,
     games::minecraft::{as_string, as_varint, get_string, get_varint, JavaResponse, Player, RequestSettings, Server},
@@ -171,52 +169,4 @@ impl Java {
     ) -> GDResult<JavaResponse> {
         Self::new(address, timeout_settings, request_settings)?.get_info()
     }
-}
-
-#[pyfunction]
-fn query_minecraft(host: &str) -> PyResult<Py<PyDict>> {
-    let response = Java::query(&host.parse().unwrap(), None, None);
-    // None is the default port (which is 27015), could also be Some(27015)
-
-    match response { // Result type, must check what it is...
-        Err(error) => {
-            println!("Couldn't query, error: {}", error);
-            Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Couldn't query, error: {}", error)))
-        },
-        Ok(r) => {
-            Python::with_gil(|py| {
-                let dict = PyDict::new(py);
-
-                dict.set_item("game_version", r.game_version)?;
-                dict.set_item("protocol_version", r.protocol_version)?;
-                dict.set_item("players_maximum", r.players_maximum)?;
-                dict.set_item("players_online", r.players_online)?;
-                dict.set_item("description", r.description)?;
-                dict.set_item("favicon", r.favicon)?;
-                dict.set_item("previews_chat", r.previews_chat)?;
-                dict.set_item("enforces_secure_chat", r.enforces_secure_chat)?;
-                dict.set_item("server_type", format!("{:?}", r.server_type))?;
-
-                if let Some(players) = r.players {
-                    let players_list = PyList::new(py, players.iter().map(|p| {
-                        let player_dict = PyDict::new(py);
-                        player_dict.set_item("name", &p.name).unwrap();
-                        player_dict.set_item("id", &p.id).unwrap();
-                        player_dict
-                    }).collect::<Vec<_>>());
-                    dict.set_item("players", players_list)?;
-                } else {
-                    dict.set_item("players", py.None())?;
-                }
-
-                Ok(dict.into_py(py))
-            })
-        }
-    }
-}
-
-#[pymodule]
-fn gamedig(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(query_minecraft, m)?)?;
-    Ok(())
 }
