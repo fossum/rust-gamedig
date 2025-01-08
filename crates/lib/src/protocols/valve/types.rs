@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 
 use crate::protocols::types::{CommonPlayer, CommonResponse, ExtraRequestSettings, GatherToggle, GenericPlayer};
+use crate::utils::ToPyDict;
 use crate::GDErrorKind::UnknownEnumCast;
 use crate::GDResult;
 use crate::{buffer::Buffer, protocols::GenericResponse};
 use byteorder::LittleEndian;
+use pyo3::types::IntoPyDict;
+use pyo3::{PyAny, PyResult};
+use pyo3::{Python, types::PyDict, IntoPy, Py};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +19,12 @@ pub enum Server {
     Dedicated,
     NonDedicated,
     TV,
+}
+
+impl IntoPy<Py<PyAny>> for &Server {
+    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
+        stringify!(Server).into_py(py)
+    }
 }
 
 impl Server {
@@ -48,6 +58,16 @@ impl Environment {
     }
 }
 
+impl IntoPy<Py<PyAny>> for &Environment {
+    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
+        match self {
+            Environment::Linux => "Linux",
+            Environment::Windows => "Windows",
+            Environment::Mac => "Mac",
+        }.into_py(py)
+    }
+}
+
 /// A query response.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +75,28 @@ pub struct Response {
     pub info: ServerInfo,
     pub players: Option<Vec<ServerPlayer>>,
     pub rules: Option<HashMap<String, String>>,
+}
+
+impl ToPyDict for Response {
+    fn to_pydict(&self, py: Python) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("info", self.info.to_pydict(py)?)?;
+        dict.set_item("players", self.players.as_ref().map(|p| p.iter().map(|player| player.to_pydict(py).unwrap()).collect::<Vec<_>>().into_py(py)))?;
+        dict.set_item("rules", self.rules.as_ref().map(|r| r.clone().into_py(py)))?;
+        Ok(dict.into_py(py))
+    }
+}
+
+impl ToPyDict for &ServerPlayer {
+    fn to_pydict(&self, py: Python) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("name", &self.name)?;
+        dict.set_item("score", self.score)?;
+        dict.set_item("duration", self.duration)?;
+        dict.set_item("deaths", self.deaths)?;
+        dict.set_item("money", self.money)?;
+        Ok(dict.into_py(py))
+    }
 }
 
 impl CommonResponse for Response {
@@ -118,6 +160,31 @@ pub struct ServerInfo {
     pub mod_data: Option<ModData>,
 }
 
+impl ToPyDict for ServerInfo {
+    fn to_pydict(&self, py: Python) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("protocol_version", self.protocol_version)?;
+        dict.set_item("name", &self.name)?;
+        dict.set_item("map", &self.map)?;
+        dict.set_item("folder", &self.folder)?;
+        dict.set_item("game_mode", &self.game_mode)?;
+        dict.set_item("appid", self.appid)?;
+        dict.set_item("players_online", self.players_online)?;
+        dict.set_item("players_maximum", self.players_maximum)?;
+        dict.set_item("players_bots", self.players_bots)?;
+        dict.set_item("server_type", &self.server_type.into_py(py))?;
+        dict.set_item("environment_type", &self.environment_type.into_py(py))?;
+        dict.set_item("has_password", self.has_password)?;
+        dict.set_item("vac_secured", self.vac_secured)?;
+        dict.set_item("the_ship", self.the_ship.as_ref().map(|s| s.into_py_dict(py)))?;
+        dict.set_item("game_version", &self.game_version)?;
+        dict.set_item("extra_data", self.extra_data.as_ref().map(|d| d.into_py_dict(py)))?;
+        dict.set_item("is_mod", self.is_mod)?;
+        dict.set_item("mod_data", self.mod_data.as_ref().map(|d| d.into_py_dict(py)))?;
+        Ok(dict.into_py(py))
+    }
+}
+
 /// A server player.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -149,6 +216,16 @@ pub struct TheShip {
     pub duration: u8,
 }
 
+impl IntoPyDict for &TheShip {
+    fn into_py_dict(self, py: Python<'_>) -> &PyDict {
+        let dict = PyDict::new(py);
+        dict.set_item("mode", self.mode).unwrap();
+        dict.set_item("witnesses", self.witnesses).unwrap();
+        dict.set_item("duration", self.duration).unwrap();
+        dict
+    }
+}
+
 /// Some extra data that the server might provide or not.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -167,6 +244,19 @@ pub struct ExtraData {
     pub game_id: Option<u64>,
 }
 
+impl IntoPyDict for &ExtraData {
+    fn into_py_dict(self, py: Python<'_>) -> &PyDict {
+        let dict = PyDict::new(py);
+        dict.set_item("port", self.port).unwrap();
+        dict.set_item("steam_id", self.steam_id).unwrap();
+        dict.set_item("tv_port", self.tv_port).unwrap();
+        dict.set_item("tv_name", &self.tv_name).unwrap();
+        dict.set_item("keywords", &self.keywords).unwrap();
+        dict.set_item("game_id", self.game_id).unwrap();
+        dict
+    }
+}
+
 /// Data related to GoldSrc Mod response.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -177,6 +267,19 @@ pub struct ModData {
     pub size: u32,
     pub multiplayer_only: bool,
     pub has_own_dll: bool,
+}
+
+impl IntoPyDict for &ModData {
+    fn into_py_dict(self, py: Python<'_>) -> &PyDict {
+        let dict = PyDict::new(py);
+        dict.set_item("link", &self.link).unwrap();
+        dict.set_item("download_link", &self.download_link).unwrap();
+        dict.set_item("version", self.version).unwrap();
+        dict.set_item("size", self.size).unwrap();
+        dict.set_item("multiplayer_only", self.multiplayer_only).unwrap();
+        dict.set_item("has_own_dll", self.has_own_dll).unwrap();
+        dict
+    }
 }
 
 pub(crate) type ExtractedData = (

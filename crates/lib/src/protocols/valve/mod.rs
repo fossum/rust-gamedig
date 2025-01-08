@@ -33,8 +33,19 @@ macro_rules! game_query_mod {
                 types::GatherToggle,
                 valve::{Engine, GatheringSettings},
             };
+            use crate::utils::convert_to_pydict;
+
+            use pyo3::prelude::*;
+            use pyo3::types::PyDict;
+            use pyo3::{pyfunction, PyResult, PyErr};
 
             crate::protocols::valve::game_query_fn!($pretty_name, $engine, $default_port, $gathering_settings);
+
+            #[pymodule]
+            pub fn $mod_name(_py: Python, m: &PyModule) -> PyResult<()> {
+                m.add_function(wrap_pyfunction!(py_query, m)?)?;
+                Ok(())
+            }
         }
     };
 }
@@ -73,6 +84,27 @@ macro_rules! game_query_fn {
             )?;
 
             Ok(crate::protocols::valve::game::Response::new_from_valve_response(valve_response))
+        }
+
+        #[pyfunction]
+        pub fn py_query(address: &str, port: Option<u16>) -> PyResult<Py<PyDict>> {
+            let socket_addr = std::net::SocketAddr::new(address.parse().unwrap(), port.unwrap_or($default_port));
+            let valve_response = crate::protocols::valve::query(
+                &socket_addr,
+                $engine,
+                Some($gathering_settings),
+                None,
+            );
+
+            match valve_response {
+                Err(error) => {
+                    println!("Couldn't query, error: {}", error);
+                    Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Couldn't query, error: {}", error)))
+                },
+                Ok(response) => {
+                    Python::with_gil(|py| convert_to_pydict(py, &response))
+                }
+            }
         }
     };
 }
